@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>椎求健康 - micro:bit 脊柱姿態跑酷訓練 (USB Serial 版)</title>
+  <title>椎求健康 - micro:bit 脊柱姿態跑酷訓練</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap');
@@ -18,20 +18,20 @@
     <div class="flex items-center space-x-3 mb-4 md:mb-0">
       <span class="text-4xl">🦴</span>
       <div>
-        <h1 class="text-2xl font-black text-teal-400">椎求健康 - 脊柱傾斜訓練跑酷 (USB Serial 版)</h1>
-        <p class="text-xs text-slate-400">透過 micro:bit 體感感應器驅動左右避障，養成挺直脊椎習慣</p>
+        <h1 class="text-2xl font-black text-teal-400">椎求健康 - 脊柱傾斜訓練跑酷</h1>
+        <p class="text-xs text-slate-400">透過 micro:bit 體感驅動左右避障，養成挺直脊椎習慣</p>
       </div>
     </div>
     
     <div class="flex space-x-3">
-      <button id="connectSerialBtn" onclick="connectSerial()" class="bg-teal-500 hover:bg-teal-600 text-slate-900 font-black px-6 py-3 rounded-xl shadow-lg transition flex items-center space-x-2">
-        <span>🔌</span>
-        <span id="serialBtnText">連接 micro:bit (USB)</span>
+      <button id="connectBleBtn" onclick="connectBluetooth()" class="bg-teal-500 hover:bg-teal-600 text-slate-900 font-black px-6 py-3 rounded-xl shadow-lg transition flex items-center space-x-2">
+        <span>🔗</span>
+        <span id="bleBtnText">連接 micro:bit 藍芽</span>
       </button>
     </div>
   </header>
 
-  <!-- 上方數據面板：姿態水平儀 + 即時數據 -->
+  <!-- 上方數據面板：水平儀 + 即時數據 -->
   <div class="w-full max-w-6xl grid grid-cols-1 md:grid-cols-12 gap-6 mb-6">
     
     <!-- 姿勢水平儀 -->
@@ -86,13 +86,13 @@
           </div>
           <div class="flex justify-between">
             <span class="text-slate-400">通訊模式:</span>
-            <span id="connMode" class="font-bold text-yellow-400">鍵盤模擬中 (未連接 USB)</span>
+            <span id="connMode" class="font-bold text-yellow-400">鍵盤模擬中 (未連接藍芽)</span>
           </div>
         </div>
       </div>
 
       <div class="bg-teal-900/30 border border-teal-500/30 text-teal-200 p-3 rounded-xl text-xs mt-4">
-        💡 提示：若未連接 USB，亦可直接使用鍵盤 <kbd class="bg-slate-700 px-1.5 py-0.5 rounded text-white">←</kbd> <kbd class="bg-slate-700 px-1.5 py-0.5 rounded text-white">→</kbd> 鍵進行遊戲測試！
+        💡 提示：若未連接 micro:bit，亦可直接使用鍵盤 <kbd class="bg-slate-700 px-1 rounded text-white">←</kbd> <kbd class="bg-slate-700 px-1 rounded text-white">→</kbd> 鍵測試遊戲！
       </div>
     </div>
   </div>
@@ -119,7 +119,7 @@
       <div id="gameOverlay" class="absolute inset-0 bg-slate-900/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
         <h3 id="overlayTitle" class="text-3xl font-black text-teal-400 mb-2">準備開始脊柱跑酷！</h3>
         <p id="overlayDesc" class="text-sm text-slate-300 max-w-md mb-6">
-          將 micro:bit 佩戴於胸前。身體向左傾斜角色左移，向右傾斜角色右移。避開紅色的不良姿態障礙物，收集綠色的脊柱星星！
+          將 micro:bit 佩戴於胸前或背部。向左傾斜身體角色左移，向右傾斜角色右移。避開紅色的不良姿態障礙物，收集綠色的脊柱星星！
         </p>
         <button onclick="startGame()" class="bg-emerald-500 hover:bg-emerald-600 text-slate-900 font-extrabold text-lg px-8 py-3 rounded-2xl shadow-lg transition transform active:scale-95">
           🚀 開始訓練遊戲
@@ -134,77 +134,80 @@
        ========================================================================== */
     let rawX = 0, rawY = 0, rawZ = -1024;
     let smoothX = 0, smoothY = 0;
-    let isSerialConnected = false;
+    let isBleConnected = false;
     let keyLeft = false, keyRight = false;
-    let port, reader;
 
-    /* ==========================================================================
-       2. Web Serial API 連接模組
-       ========================================================================== */
-    async function connectSerial() {
-      if (!('serial' in navigator)) {
-        alert("⚠️ 您的瀏覽器不支援 Web Serial API！請使用 Desktop 版 Chrome 或 Edge 瀏覽器。");
-        return;
-      }
+ /* 強效版：不限名稱過濾，列出附近所有 BLE 藍芽裝置 */
+const UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const UART_TX_CHARACTERISTIC_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 
-      try {
-        document.getElementById('serialBtnText').innerText = "選擇裝置中...";
-        port = await navigator.serial.requestPort();
-        await port.open({ baudRate: 115200 });
+async function connectBluetooth() {
+  if (window.location.protocol === 'file:') {
+    alert("⚠️ 請勿直接開啟 file:// 檔案！請使用 Live Server (http://127.0.0.1:5500) 開啟網頁。");
+    return;
+  }
 
-        isSerialConnected = true;
-        document.getElementById('serialBtnText').innerText = "✅ 已成功連接 micro:bit";
-        document.getElementById('connectSerialBtn').className = "bg-emerald-500 text-slate-900 font-black px-6 py-3 rounded-xl shadow-lg flex items-center space-x-2";
-        document.getElementById('connMode').innerText = "Web Serial USB (115200 baud)";
-        document.getElementById('connMode').className = "font-bold text-emerald-400";
+  if (!navigator.bluetooth) {
+    alert("⚠️ 您的瀏覽器不支援 Web Bluetooth，請使用 Chrome 或 Edge！");
+    return;
+  }
 
-        readSerialStream();
-      } catch (err) {
-        console.error("Serial 連接錯誤:", err);
-        document.getElementById('serialBtnText').innerText = "連接 micro:bit (USB)";
-        if (err.name !== 'NotFoundError') {
-          alert("序列埠連接失敗: " + err.message);
-        }
-      }
+  try {
+    document.getElementById('bleBtnText').innerText = "搜尋所有藍芽裝置中...";
+
+    // 關鍵修改：取消名稱限制，列出附近所有裝置
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [UART_SERVICE_UUID]
+    });
+
+    document.getElementById('bleBtnText').innerText = "建立藍芽連線中...";
+    device.addEventListener('gattserverdisconnected', onDisconnected);
+
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(UART_SERVICE_UUID);
+    const characteristic = await service.getCharacteristic(UART_TX_CHARACTERISTIC_UUID);
+
+    await characteristic.startNotifications();
+    characteristic.addEventListener('characteristicvaluechanged', handleBleData);
+
+    isBleConnected = true;
+    document.getElementById('bleBtnText').innerText = "✅ 已成功連線：" + (device.name || "micro:bit");
+    document.getElementById('connectBleBtn').className = "bg-emerald-500 text-slate-900 font-black px-6 py-3 rounded-xl shadow-lg flex items-center space-x-2";
+    document.getElementById('connMode').innerText = "藍芽 BLE (20Hz)";
+    document.getElementById('connMode').className = "font-bold text-emerald-400";
+
+  } catch (err) {
+    console.error("藍芽連線失敗:", err);
+    document.getElementById('bleBtnText').innerText = "重新連接藍芽";
+    if (err.name !== 'NotFoundError') {
+      alert("藍芽連線失敗: " + err.message);
     }
+  }
+}
 
-    async function readSerialStream() {
-      const decoder = new TextDecoderStream();
-      const inputDone = port.readable.pipeTo(decoder.writable);
-      const inputStream = decoder.readable;
-      reader = inputStream.getReader();
+    let bleBuffer = "";
+    function handleBleData(event) {
+      const decoder = new TextDecoder('utf-8');
+      bleBuffer += decoder.decode(event.target.value);
 
-      let buffer = "";
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (value) {
-            buffer += value;
-            let lines = buffer.split('\n');
-            buffer = lines.pop(); // 保留尚未完結的最後一行
+      const lines = bleBuffer.split('\n');
+      bleBuffer = lines.pop(); // 留存未完成的最後一行
 
-            for (let line of lines) {
-              line = line.trim();
-              if (line) {
-                let parts = line.split(',');
-                if (parts.length === 3) {
-                  rawX = parseInt(parts[0]) || 0;
-                  rawY = parseInt(parts[1]) || 0;
-                  rawZ = parseInt(parts[2]) || -1024;
-                }
-              }
-            }
+      for (let line of lines) {
+        line = line.trim();
+        if (line) {
+          const parts = line.split(',');
+          if (parts.length === 3) {
+            rawX = parseInt(parts[0]) || 0;
+            rawY = parseInt(parts[1]) || 0;
+            rawZ = parseInt(parts[2]) || -1024;
           }
         }
-      } catch (error) {
-        console.error("讀取序列埠數據失敗:", error);
-      } finally {
-        reader.releaseLock();
       }
     }
 
-    /* 鍵盤模擬備援事件 */
+    /* 鍵盤模擬備援事件Listener */
     window.addEventListener('keydown', e => {
       if (e.key === 'ArrowLeft') keyLeft = true;
       if (e.key === 'ArrowRight') keyRight = true;
@@ -221,8 +224,8 @@
     const levelCtx = levelCanvas.getContext('2d');
 
     function updateLevelAndMetrics() {
-      // 若未連接 USB 序列埠，以鍵盤模擬 X 軸數值
-      if (!isSerialConnected) {
+      // 若未連接藍芽，以鍵盤模擬 X 軸數值
+      if (!isBleConnected) {
         if (keyLeft) rawX = -600;
         else if (keyRight) rawX = 600;
         else rawX = 0;
@@ -237,7 +240,7 @@
       document.getElementById('valY').innerText = Math.round(smoothY);
       document.getElementById('valZ').innerText = Math.round(rawZ);
 
-      // 計算大致角度 (-1024~1024 對應 -90°~90°)
+      // 計算大致角度 (將 -1024~1024 對應至 -90°~90°)
       const rollDeg = (smoothX / 1024) * 90;
       const pitchDeg = (smoothY / 1024) * 90;
 
@@ -257,7 +260,9 @@
         badge.className = "bg-amber-500/20 text-amber-400 text-xs font-bold px-3 py-1 rounded-full border border-amber-500/30";
       }
 
+      // 繪製水平儀 Canvas
       drawLevelCanvas(smoothX, smoothY);
+
       requestAnimationFrame(updateLevelAndMetrics);
     }
 
@@ -269,6 +274,7 @@
 
       levelCtx.clearRect(0, 0, w, h);
 
+      // 1. 背景底盤與標尺網格
       levelCtx.fillStyle = '#0f172a';
       levelCtx.fillRect(0, 0, w, h);
 
@@ -281,6 +287,7 @@
       levelCtx.moveTo(cx, cy - 90); levelCtx.lineTo(cx, cy + 90);
       levelCtx.stroke();
 
+      // 2. 中央綠色安全區域 (Threshold Circle)
       levelCtx.fillStyle = 'rgba(16, 185, 129, 0.15)';
       levelCtx.beginPath();
       levelCtx.arc(cx, cy, 25, 0, Math.PI * 2);
@@ -288,12 +295,14 @@
       levelCtx.strokeStyle = '#10b981';
       levelCtx.stroke();
 
+      // 3. 計算氣泡座標偏移 (限制在圓形邊界內)
       let bubbleX = cx + (xVal / 1024) * 80;
       let bubbleY = cy + (yVal / 1024) * 80;
 
       const dist = Math.hypot(bubbleX - cx, bubbleY - cy);
-      const maxDist = 25;
+      const maxDist = 25; // 離中心距離判斷
 
+      // 4. 氣泡繪製 (在安全區內呈現綠色，歪斜時呈現紅色)
       levelCtx.fillStyle = dist <= maxDist ? '#34d399' : '#f87171';
       levelCtx.shadowColor = dist <= maxDist ? '#059669' : '#dc2626';
       levelCtx.shadowBlur = 12;
@@ -301,7 +310,7 @@
       levelCtx.beginPath();
       levelCtx.arc(bubbleX, bubbleY, 14, 0, Math.PI * 2);
       levelCtx.fill();
-      levelCtx.shadowBlur = 0;
+      levelCtx.shadowBlur = 0; // 重置 Shadow
     }
 
     /* ==========================================================================
@@ -310,11 +319,12 @@
     const gameCanvas = document.getElementById('gameCanvas');
     const ctx = gameCanvas.getContext('2d');
 
-    let gameState = 'STOPPED';
+    let gameState = 'STOPPED'; // STOPPED, PLAYING, GAMEOVER
     let score = 0;
     let lives = 3;
     let roadOffset = 0;
 
+    // 玩家角色屬性
     const player = {
       x: gameCanvas.width / 2,
       y: gameCanvas.height - 70,
@@ -323,9 +333,9 @@
       targetX: gameCanvas.width / 2
     };
 
+    // 障礙物與星星項目
     let obstacles = [];
     let starCollectibles = [];
-    let lastSpawnTime = 0;
 
     function startGame() {
       score = 0;
@@ -342,6 +352,8 @@
       requestAnimationFrame(gameLoop);
     }
 
+    let lastSpawnTime = 0;
+
     function gameLoop() {
       if (gameState !== 'PLAYING') return;
 
@@ -352,16 +364,22 @@
     }
 
     function updateGameLogic() {
+      // 1. 移動捲軸路面感
       roadOffset = (roadOffset + 6) % 40;
 
+      // 2. 根據傾斜 X 軸計算 Player 位置 (-1024~1024 對應 Canvas 寬度 100~700)
       const normX = Math.max(-800, Math.min(800, smoothX));
       player.targetX = (gameCanvas.width / 2) + (normX / 800) * (gameCanvas.width / 2 - 60);
+      
+      // 平滑內插移動
       player.x += (player.targetX - player.x) * 0.15;
 
+      // 3. 定期生成障礙物與星星
       const now = Date.now();
       if (now - lastSpawnTime > 1200) {
         lastSpawnTime = now;
 
+        // 隨機生成紅障礙
         const obsX = Math.random() * (gameCanvas.width - 120) + 60;
         obstacles.push({
           x: obsX,
@@ -371,6 +389,7 @@
           speed: 4 + Math.floor(score / 50)
         });
 
+        // 隨機生成綠星星
         if (Math.random() > 0.4) {
           const starX = Math.random() * (gameCanvas.width - 120) + 60;
           starCollectibles.push({
@@ -382,10 +401,12 @@
         }
       }
 
+      // 4. 更新障礙物位置與碰撞檢測
       for (let i = obstacles.length - 1; i >= 0; i--) {
         const obs = obstacles[i];
         obs.y += obs.speed;
 
+        // AABB 碰撞檢測
         if (
           player.x - player.width / 2 < obs.x + obs.width &&
           player.x + player.width / 2 > obs.x &&
@@ -396,25 +417,30 @@
           lives--;
           updateLivesDisplay();
 
-          if (lives <= 0) triggerGameOver();
+          if (lives <= 0) {
+            triggerGameOver();
+          }
           continue;
         }
 
+        // 超出畫面下緣
         if (obs.y > gameCanvas.height + 50) {
           obstacles.splice(i, 1);
-          score += 5;
+          score += 5; // 成功避開加分
           document.getElementById('gameScore').innerText = score;
         }
       }
 
+      // 5. 更新星星收集品
       for (let i = starCollectibles.length - 1; i >= 0; i--) {
         const star = starCollectibles[i];
         star.y += star.speed;
 
+        // 圓形/點碰撞
         const dist = Math.hypot(player.x - star.x, player.y - star.y);
         if (dist < player.width / 2 + star.radius) {
           starCollectibles.splice(i, 1);
-          score += 25;
+          score += 25; // 吃到星星高分獎勵
           document.getElementById('gameScore').innerText = score;
           continue;
         }
@@ -431,6 +457,7 @@
 
       ctx.clearRect(0, 0, w, h);
 
+      // 1. 繪製 3D 跑道線
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(0, 0, w, h);
 
@@ -438,14 +465,16 @@
       ctx.lineWidth = 4;
       ctx.strokeRect(40, 0, w - 80, h);
 
+      // 虛線跑道分隔
       ctx.setLineDash([20, 20]);
       ctx.lineDashOffset = -roadOffset;
       ctx.beginPath();
       ctx.moveTo(w / 3, 0); ctx.lineTo(w / 3, h);
       ctx.moveTo((w / 3) * 2, 0); ctx.lineTo((w / 3) * 2, h);
       ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.setLineDash([]); // 重置
 
+      // 2. 繪製障礙物 (紅塊 - 代表坐姿不良怪物)
       obstacles.forEach(obs => {
         ctx.fillStyle = '#ef4444';
         ctx.shadowColor = '#dc2626';
@@ -455,11 +484,13 @@
         ctx.fill();
         ctx.shadowBlur = 0;
 
+        // 圖示文字
         ctx.fillStyle = '#ffffff';
         ctx.font = '20px sans-serif';
         ctx.fillText('👾', obs.x + 8, obs.y + 28);
       });
 
+      // 3. 繪製星星 (綠/黃圓 - 代表脊柱健康獎勵)
       starCollectibles.forEach(star => {
         ctx.fillStyle = '#10b981';
         ctx.shadowColor = '#059669';
@@ -474,6 +505,7 @@
         ctx.fillText('⭐', star.x - 7, star.y + 5);
       });
 
+      // 4. 繪製玩家角色 (挺直的人形標籤)
       ctx.fillStyle = '#38bdf8';
       ctx.shadowColor = '#0284c7';
       ctx.shadowBlur = 15;
@@ -501,6 +533,7 @@
       document.getElementById('gameOverlay').classList.remove('hidden');
     }
 
+    /* 初始化執行 */
     window.onload = () => {
       updateLevelAndMetrics();
     };
