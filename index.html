@@ -137,65 +137,51 @@
     let isBleConnected = false;
     let keyLeft = false, keyRight = false;
 
-    /* 優化版 Web Bluetooth 連線邏輯 (相容 BBC micro:bit 與自訂名稱) */
+/* 強效版：不限名稱過濾，列出附近所有 BLE 藍芽裝置 */
 const UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 const UART_TX_CHARACTERISTIC_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 
 async function connectBluetooth() {
-  // 1. 環境安全檢查
   if (window.location.protocol === 'file:') {
-    alert("⚠️ Web Bluetooth 無法在 file:// 協定下運作！\n請使用 Live Server (http://127.0.0.1:5500) 或 HTTPS 伺服器開啟網頁。");
+    alert("⚠️ 請勿直接開啟 file:// 檔案！請使用 Live Server (http://127.0.0.1:5500) 開啟網頁。");
     return;
   }
 
   if (!navigator.bluetooth) {
-    alert("⚠️ 您的瀏覽器不支援 Web Bluetooth API！\n請使用 Chrome 或 Edge 瀏覽器（iOS 裝置暫不支援）。");
+    alert("⚠️ 您的瀏覽器不支援 Web Bluetooth，請使用 Chrome 或 Edge！");
     return;
   }
 
   try {
-    document.getElementById('bleBtnText').innerText = "搜尋裝置中...";
-    console.log("開始搜尋 BLE 裝置...");
+    document.getElementById('bleBtnText').innerText = "搜尋所有藍芽裝置中...";
 
-    // 2. 廣泛匹配名稱 (包含 'BBC micro:bit' 與 'micro:bit')
+    // 關鍵修改：取消名稱限制，列出附近所有裝置
     const device = await navigator.bluetooth.requestDevice({
-      filters: [
-        { namePrefix: 'BBC micro:bit' },
-        { namePrefix: 'micro:bit' }
-      ],
+      acceptAllDevices: true,
       optionalServices: [UART_SERVICE_UUID]
     });
 
-    console.log(`成功找到裝置: ${device.name}`);
-    document.getElementById('bleBtnText').innerText = "建立 GATT 連線...";
-
-    // 斷開連線監聽器
+    document.getElementById('bleBtnText').innerText = "建立藍芽連線中...";
     device.addEventListener('gattserverdisconnected', onDisconnected);
 
-    // 3. 連接 GATT 伺服器
     const server = await device.gatt.connect();
-    console.log("GATT 伺服器已連線");
-
-    // 4. 獲取 UART 服務與特徵值
     const service = await server.getPrimaryService(UART_SERVICE_UUID);
     const characteristic = await service.getCharacteristic(UART_TX_CHARACTERISTIC_UUID);
 
-    // 5. 訂閱通知數據流
     await characteristic.startNotifications();
     characteristic.addEventListener('characteristicvaluechanged', handleBleData);
 
-    // 更新介面狀態
     isBleConnected = true;
-    document.getElementById('bleBtnText').innerText = "✅ 已成功連線 micro:bit";
+    document.getElementById('bleBtnText').innerText = "✅ 已成功連線：" + (device.name || "micro:bit");
     document.getElementById('connectBleBtn').className = "bg-emerald-500 text-slate-900 font-black px-6 py-3 rounded-xl shadow-lg flex items-center space-x-2";
-    document.getElementById('connMode').innerText = "藍芽 BLE UART (20Hz)";
+    document.getElementById('connMode').innerText = "藍芽 BLE (20Hz)";
     document.getElementById('connMode').className = "font-bold text-emerald-400";
 
   } catch (err) {
     console.error("藍芽連線失敗:", err);
     document.getElementById('bleBtnText').innerText = "重新連接藍芽";
-    if (err.name !== 'NotFoundError') { // 使用者主動取消選擇時不彈出 alert
-      alert("藍芽連線失敗:\n" + err.message + "\n\n請確認 micro:bit 正顯示 B 字母且 MakeCode 已設定 No Passkey 模式。");
+    if (err.name !== 'NotFoundError') {
+      alert("藍芽連線失敗: " + err.message);
     }
   }
 }
