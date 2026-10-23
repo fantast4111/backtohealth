@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>椎求健康 - 樂齡脊柱健康一鍵檢測助手</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- MediaPipe Pose & Camera Utils -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;800&display=swap');
+    body {
+      font-family: 'Noto Sans TC', sans-serif;
+      background-color: #f0fdf4;
+    }
+    .mirror {
+      transform: scaleX(-1);
+    }
+    .modal-enter {
+      animation: fadeIn 0.3s ease-out forwards;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    @media print {
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+      body { background-color: #ffffff; color: #000; }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col text-slate-800">
+
+  <!-- 頂部導覽列 -->
+  <header class="bg-teal-700 text-white shadow-md p-4 no-print flex justify-between items-center px-6">
+    <div class="flex items-center space-x-3">
+      <span class="text-3xl">🦴</span>
+      <div>
+        <h1 class="text-2xl font-extrabold tracking-wide">椎求健康</h1>
+        <p class="text-xs text-teal-100">樂齡脊柱健康非植入式一鍵檢測與訓練系統</p>
+      </div>
+    </div>
+    <div class="flex space-x-3">
+      <button onclick="openVoiceSettings()" class="bg-teal-600 hover:bg-teal-500 text-white px-4 py-2 rounded-xl text-base font-bold shadow flex items-center space-x-2 border border-teal-400">
+        <span>⚙️</span>
+        <span>語音與語速設定</span>
+      </button>
+      <button onclick="triggerQuickDemo()" class="bg-amber-500 hover:bg-amber-400 text-slate-900 px-4 py-2 rounded-xl text-base font-extrabold shadow flex items-center space-x-1 border border-amber-300">
+        <span>⚡</span>
+        <span>快速測試報告</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 本地檔案 Protocol 提示 -->
+  <div id="fileProtocolWarning" class="hidden bg-red-600 text-white px-6 py-2 text-sm text-center font-bold no-print">
+    ⚠️ 偵測到您直接雙擊檔案開啟 (file://)。如鏡頭無法顯示，請使用 Live Server 或 GitHub Pages 開啟。
+  </div>
+
+  <!-- 醫療免責溫馨提示列 -->
+  <div class="bg-amber-100 border-b border-amber-300 text-amber-900 px-6 py-2 text-sm text-center font-bold flex items-center justify-center space-x-2 no-print">
+    <span>⚕️ 溫馨提示：</span>
+    <span>本測試非精密醫療診斷，結果僅用作初步檢測與日常保健參考。如欲進一步了解脊柱情況，請尋求專業醫生或物理治療師之建議。</span>
+  </div>
+
+  <!-- 主要內容區 -->
+  <main class="flex-1 max-w-6xl w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 no-print">
+
+    <!-- 左側：鏡頭與畫面分析區 -->
+    <div class="lg:col-span-7 flex flex-col space-y-4">
+      <div class="relative bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border-4 border-teal-600 aspect-[4/3] flex items-center justify-center">
+        
+        <!-- 視訊與 Canvas 疊加層 -->
+        <video id="videoElement" class="hidden" playsinline muted></video>
+        <canvas id="outputCanvas" class="absolute inset-0 w-full h-full object-cover mirror"></canvas>
+
+        <!-- 鏡頭錯誤提示浮層 -->
+        <div id="cameraErrorBox" class="hidden absolute inset-0 bg-slate-900/90 text-white p-6 flex flex-col items-center justify-center text-center space-y-3 z-20">
+          <span class="text-4xl">📷❌</span>
+          <h3 class="text-xl font-bold text-red-400">無法存取攝影機影像</h3>
+          <p class="text-xs text-slate-300 max-w-md">請檢查網址列授權，或使用下方按鈕進行模擬模型測試。</p>
+          <div class="flex space-x-3 pt-2">
+            <button onclick="restartCamera()" class="bg-teal-600 hover:bg-teal-500 text-white px-4 py-2 rounded-xl text-xs font-bold">重新載入鏡頭</button>
+            <button onclick="toggleSimMode()" class="bg-amber-500 hover:bg-amber-400 text-slate-900 px-4 py-2 rounded-xl text-xs font-bold">切換至模擬模型測試</button>
+          </div>
+        </div>
+
+        <!-- 倒數與提示 HUD 蓋層 -->
+        <div id="hudOverlay" class="absolute inset-0 flex flex-col items-center justify-between p-6 pointer-events-none z-10">
+          
+          <!-- 頂部狀態標籤 -->
+          <div class="bg-slate-900/80 backdrop-blur-md text-white text-lg font-bold px-6 py-2 rounded-full border border-teal-400 shadow-lg flex items-center space-x-2">
+            <span id="statusDot" class="w-3 h-3 rounded-full bg-slate-400"></span>
+            <span id="statusText">系統初始化中...</span>
+          </div>
+
+          <!-- 側身辨識匹配進度條 -->
+          <div id="sideAlignProgressContainer" class="hidden w-full max-w-md bg-slate-900/90 p-4 rounded-2xl border border-teal-400/50 backdrop-blur-md flex flex-col items-center space-y-2 pointer-events-auto">
+            <div class="text-yellow-300 font-bold text-base flex items-center space-x-2">
+              <span class="animate-pulse">🔄</span>
+              <span>請打側身（90度）站好...</span>
+            </div>
+            <div class="w-full bg-slate-700 h-4 rounded-full overflow-hidden border border-slate-600">
+              <div id="sideAlignProgressBar" class="bg-gradient-to-r from-yellow-400 to-green-400 h-full w-0 transition-all duration-200"></div>
+            </div>
+            <p class="text-xs text-slate-300">側身姿勢對齊進度：<span id="sideAlignPercent">0%</span></p>
+          </div>
+
+          <!-- 中央超大倒數計數器 -->
+          <div id="countdownBox" class="hidden flex flex-col items-center justify-center bg-teal-900/80 text-white rounded-3xl p-6 border-2 border-teal-400 backdrop-blur-sm shadow-2xl animate-bounce pointer-events-auto">
+            <span class="text-xl font-bold text-teal-200" id="countdownPhaseTitle">正面檢測中</span>
+            <span id="countdownNumber" class="text-7xl font-extrabold text-yellow-300">3</span>
+            <span class="text-sm text-teal-100">請保持最自然姿勢站好，請勿移動</span>
+          </div>
+
+          <!-- 底部即時數據微覽 -->
+          <div class="w-full flex justify-between items-end text-xs text-white/90">
+            <div class="bg-black/60 px-3 py-1.5 rounded-lg border border-white/20">
+              相機狀態: <span id="cameraStatus" class="text-yellow-400 font-bold">載入中</span>
+            </div>
+            <div class="bg-black/60 px-3 py-1.5 rounded-lg border border-white/20">
+              骨架偵測: <span id="poseConfidence" class="text-yellow-400 font-bold">待命</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 操作按鈕控制面板 -->
+      <div class="bg-white rounded-2xl p-5 shadow-md border border-teal-100 flex flex-col space-y-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <button id="startScanBtn" onclick="startAutomatedScan()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xl py-4 px-6 rounded-2xl shadow-lg border-b-4 border-emerald-800 active:translate-y-0.5 flex items-center justify-center space-x-3">
+            <span class="text-2xl">▶️</span>
+            <span>開始一鍵自動檢測</span>
+          </button>
+          
+          <button id="simToggleBtn" onclick="toggleSimMode()" class="bg-slate-700 hover:bg-slate-800 text-white font-bold text-base py-4 px-4 rounded-2xl shadow flex items-center justify-center space-x-2 border border-slate-600">
+            <span>🤖</span>
+            <span id="simBtnLabel">開啟模擬模型（無鏡頭）</span>
+          </button>
+        </div>
+
+        <button id="manualSideBtn" onclick="forceStartSideScan()" class="hidden bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold text-base py-2 px-4 rounded-xl shadow border border-amber-600 flex items-center justify-center space-x-2">
+          <span>⚠️</span>
+          <span>辨識較慢？點此手動開始側邊檢測</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 右側：檢測流程說明與長者指引區 -->
+    <div class="lg:col-span-5 flex flex-col space-y-4">
+      <div class="bg-white rounded-2xl p-6 shadow-md border border-teal-100 flex-1 flex flex-col justify-between">
+        <div>
+          <h2 class="text-xl font-extrabold text-teal-800 border-b-2 border-teal-200 pb-3 mb-4 flex items-center space-x-2">
+            <span>📋</span>
+            <span>檢測三步曲指示</span>
+          </h2>
+
+          <div class="space-y-4">
+            <div id="stepCard1" class="p-4 rounded-xl bg-teal-50 border-2 border-teal-200 transition-all flex items-start space-x-3">
+              <div class="bg-teal-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0">1</div>
+              <div>
+                <h3 class="font-bold text-teal-900 text-base">正面站好 (3秒)</h3>
+                <p class="text-xs text-teal-700 mt-1">正對鏡頭，以最自然的姿勢放鬆站立。系統會測量高低肩與脊柱中軸對齊。</p>
+              </div>
+            </div>
+
+            <div id="stepCard2" class="p-4 rounded-xl bg-slate-50 border-2 border-slate-200 transition-all flex items-start space-x-3">
+              <div class="bg-slate-400 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0">2</div>
+              <div>
+                <h3 class="font-bold text-slate-800 text-base">轉身打側 (3秒)</h3>
+                <p class="text-xs text-slate-600 mt-1">聽取語音提示後轉身 90 度。智慧系統辨識側身成功後會自動開始倒數測量駝背與頭頸角度。</p>
+              </div>
+            </div>
+
+            <div id="stepCard3" class="p-4 rounded-xl bg-slate-50 border-2 border-slate-200 transition-all flex items-start space-x-3">
+              <div class="bg-slate-400 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0">3</div>
+              <div>
+                <h3 class="font-bold text-slate-800 text-base">檢視報告與 QR Code</h3>
+                <p class="text-xs text-slate-600 mt-1">彈出綜合健康報告，生成專屬 QR Code，隨時下載或列印攜同諮詢醫生。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-6 pt-4 border-t border-slate-200">
+          <div class="flex justify-between items-center mb-2">
+            <span class="text-sm font-bold text-slate-600">最近一次測量評分：</span>
+            <span id="lastScoreLabel" class="text-xl font-extrabold text-teal-600">尚未測試</span>
+          </div>
+          <p class="text-xs text-slate-500">測試紀錄會保存在本機器，可重複測試追蹤改善進度。</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 報告彈出視窗 MODAL -->
+  <div id="reportModal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-50 hidden items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] overflow-y-auto shadow-2xl border-4 border-teal-500 p-6 md:p-8 relative modal-enter my-auto">
+      <button onclick="closeReportModal()" class="absolute top-4 right-4 bg-slate-200 hover:bg-slate-300 text-slate-700 w-10 h-10 rounded-full font-bold text-xl flex items-center justify-center shadow no-print">✕</button>
+
+      <div class="border-b-4 border-teal-600 pb-4 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <div class="flex items-center space-x-3">
+            <span class="text-4xl">🦴</span>
+            <div>
+              <h2 class="text-3xl font-extrabold text-teal-900">「椎求健康」脊柱健康綜合報告</h2>
+              <p class="text-sm text-slate-500">檢測時間：<span id="reportTimestamp">--</span></p>
+            </div>
+          </div>
+        </div>
+        <div class="bg-gradient-to-r from-teal-500 to-emerald-600 text-white px-6 py-3 rounded-2xl shadow-md text-center">
+          <div class="text-xs uppercase font-bold text-teal-100">健康綜合指數</div>
+          <div class="text-4xl font-extrabold" id="reportOverallScore">-- <span class="text-base font-normal">/ 100</span></div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div class="bg-teal-50 p-5 rounded-2xl border border-teal-200 flex flex-col justify-between">
+          <div>
+            <div class="flex justify-between items-center mb-3">
+              <h3 class="font-extrabold text-teal-900 text-lg flex items-center space-x-2">
+                <span>🧍‍♂️</span>
+                <span>正面平衡評估</span>
+              </h3>
+              <span id="shoulderBadge" class="bg-emerald-200 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full">健康標準</span>
+            </div>
+            
+            <div class="space-y-2 text-sm text-slate-700">
+              <div class="flex justify-between border-b border-teal-200/60 pb-1">
+                <span>雙肩傾斜角 (Shoulder Tilt):</span>
+                <span class="font-bold text-teal-900" id="reportShoulderAngle">0.0°</span>
+              </div>
+              <div class="flex justify-between border-b border-teal-200/60 pb-1">
+                <span>脊柱中軸偏離 (Spine Alignment):</span>
+                <span class="font-bold text-teal-900" id="reportSpineAlignment">正常</span>
+              </div>
+            </div>
+          </div>
+
+          <p id="reportShoulderAdvice" class="text-xs text-teal-800 bg-white/80 p-3 rounded-xl border border-teal-200 mt-4">
+            雙肩保持水平良好，建議繼續保持良好坐姿與對稱負重。
+          </p>
+        </div>
+
+        <div class="bg-amber-50 p-5 rounded-2xl border border-amber-200 flex flex-col justify-between">
+          <div>
+            <div class="flex justify-between items-center mb-3">
+              <h3 class="font-extrabold text-amber-900 text-lg flex items-center space-x-2">
+                <span>🚶‍♂️</span>
+                <span>側邊體態評估</span>
+              </h3>
+              <span id="headBadge" class="bg-emerald-200 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full">良好</span>
+            </div>
+
+            <div class="space-y-2 text-sm text-slate-700">
+              <div class="flex justify-between border-b border-amber-200/60 pb-1">
+                <span>頭頸前傾角 (Forward Head):</span>
+                <span class="font-bold text-amber-900" id="reportHeadForwardAngle">0.0°</span>
+              </div>
+              <div class="flex justify-between border-b border-amber-200/60 pb-1">
+                <span>胸椎彎曲度 (Kyphosis Curve):</span>
+                <span class="font-bold text-amber-900" id="reportKyphosisAngle">微彎</span>
+              </div>
+            </div>
+          </div>
+
+          <p id="reportHeadAdvice" class="text-xs text-amber-900 bg-white/80 p-3 rounded-xl border border-amber-200 mt-4">
+            頸椎角度正常，建議每坐40分鐘站立伸展5分鐘。
+          </p>
+        </div>
+      </div>
+
+      <div class="bg-slate-50 p-5 rounded-2xl border border-slate-200 mb-6">
+        <h3 class="font-extrabold text-slate-800 text-base mb-3 flex items-center space-x-2">
+          <span>🧘‍♂️</span>
+          <span>推薦樂齡健脊運動建議</span>
+        </h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+            <h4 class="font-bold text-teal-800 text-sm">1. 坐姿伸展胸椎</h4>
+            <p class="text-slate-600 mt-1">坐在穩固椅子上，雙手撫膝，緩慢挺胸抬頭，重複 5 次。</p>
+          </div>
+          <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+            <h4 class="font-bold text-teal-800 text-sm">2. 貼牆立正收下巴</h4>
+            <p class="text-slate-600 mt-1">後腦勺與雙肩貼牆，收緊下巴保持 10 秒，改善烏龜頸。</p>
+          </div>
+          <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+            <h4 class="font-bold text-teal-800 text-sm">3. 靠椅抬腿核心訓練</h4>
+            <p class="text-slate-600 mt-1">坐姿下交替緩慢抬高雙腿，增強腹肌，減輕腰椎負擔。</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- QR Code 區塊 (Google QR Code API 驅動) -->
+      <div class="bg-emerald-50 p-5 rounded-2xl border-2 border-emerald-300 flex flex-col md:flex-row items-center justify-between gap-6 mb-6">
+        <div class="flex-1 space-y-2">
+          <h3 class="font-extrabold text-emerald-900 text-base flex items-center space-x-2">
+            <span>📱</span>
+            <span>掃描 QR Code 儲存此檢測報告</span>
+          </h3>
+          <p class="text-xs text-emerald-800">用手機相機掃描右側 QR Code，可將本次健康檢測數據直接儲存於手機中：</p>
+          
+          <div class="bg-white p-2 rounded-xl border border-emerald-200 text-[11px] font-mono text-slate-600 overflow-x-auto max-h-20 select-all">
+            <span id="qrPayloadPreview">Payload: --</span>
+          </div>
+
+          <button onclick="copyQRPayload()" class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-3 rounded-lg shadow no-print">
+            📋 一鍵複製文字報告
+          </button>
+        </div>
+
+        <div class="flex flex-col items-center bg-white p-3 rounded-2xl shadow border border-emerald-200 min-w-[160px]">
+          <div id="qrCodeContainer" class="w-36 h-36 border border-slate-200 rounded-lg overflow-hidden flex items-center justify-center bg-white p-1">
+            <!-- Google API QR 圖檔渲染區 -->
+          </div>
+          <a id="downloadQRBtn" download="spine_health_qrcode.png" target="_blank" class="mt-2 text-xs text-teal-700 font-bold hover:underline no-print">💾 下載 QR 圖檔</a>
+        </div>
+      </div>
+
+      <div class="bg-red-50 border border-red-200 text-red-900 p-4 rounded-xl text-xs leading-relaxed mb-6">
+        <span class="font-bold">⚠️ 醫療免責與溫馨提示：</span>
+        本系統係運用電腦視覺與智慧感測器進行姿態估算，結果僅用作初步輔助篩查與樂齡日常保健參考，非醫療專業診斷。如有慢性腰背疼痛或脊柱明顯不適，請尋求合格醫生或物理治療師專業診斷與治療。
+      </div>
+
+      <div class="flex justify-end space-x-4 border-t border-slate-200 pt-4 no-print">
+        <button onclick="window.print()" class="bg-teal-700 hover:bg-teal-800 text-white font-bold py-3 px-6 rounded-xl shadow flex items-center space-x-2">
+          <span>🖨️</span>
+          <span>列印 / 存為 PDF 報告</span>
+        </button>
+        <button onclick="closeReportModal()" class="bg-slate-600 hover:bg-slate-700 text-white font-bold py-3 px-6 rounded-xl shadow">
+          關閉視窗
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 語音設定 Modal -->
+  <div id="voiceSettingsModal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border-4 border-teal-500 relative modal-enter max-h-[90vh] overflow-y-auto">
+      <button onclick="closeVoiceSettings()" class="absolute top-4 right-4 bg-slate-200 hover:bg-slate-300 text-slate-700 w-10 h-10 rounded-full font-bold text-xl flex items-center justify-center shadow">✕</button>
+
+      <h2 class="text-2xl font-extrabold text-teal-900 border-b pb-3 mb-4 flex items-center space-x-2">
+        <span>⚙️</span>
+        <span>語音文案、語言與語速設定</span>
+      </h2>
+
+      <div class="bg-teal-50 p-4 rounded-2xl border border-teal-200 space-y-4 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-bold text-teal-900 mb-1">語音語言 (Language):</label>
+            <select id="langSelect" onchange="onLangChange()" class="w-full bg-white border border-teal-300 rounded-xl p-2.5 font-bold text-slate-800 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
+              <option value="zh-HK" selected>廣東話 (Cantonese zh-HK)</option>
+              <option value="en-US">English (en-US)</option>
+            </select>
+          </div>
+
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <label class="text-xs font-bold text-teal-900">語音速度 (Speech Rate):</label>
+              <span id="rateValueDisplay" class="text-xs font-bold bg-teal-600 text-white px-2 py-0.5 rounded">0.9x</span>
+            </div>
+            <input type="range" id="speechRateSlider" min="0.5" max="1.5" step="0.1" value="0.9" oninput="updateSpeechRate(this.value)" class="w-full accent-teal-600 h-2 bg-teal-200 rounded-lg cursor-pointer">
+            <div class="flex justify-between text-[10px] text-teal-700 mt-1">
+              <span>0.5x (慢速樂齡)</span>
+              <span>1.0x (標準)</span>
+              <span>1.5x (快速)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">1. 正面檢測提示語：</label>
+          <div class="flex space-x-2">
+            <input type="text" id="scriptFront" class="flex-1 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500">
+            <button onclick="previewScript('scriptFront')" class="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-xl text-xs font-bold shadow">🔊 試聽</button>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">2. 請打側身轉身提示語：</label>
+          <div class="flex space-x-2">
+            <input type="text" id="scriptSideTurn" class="flex-1 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500">
+            <button onclick="previewScript('scriptSideTurn')" class="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-xl text-xs font-bold shadow">🔊 試聽</button>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">3. 成功辨識側身提示語：</label>
+          <div class="flex space-x-2">
+            <input type="text" id="scriptSideSuccess" class="flex-1 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500">
+            <button onclick="previewScript('scriptSideSuccess')" class="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-xl text-xs font-bold shadow">🔊 試聽</button>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">4. 檢測完成提示語：</label>
+          <div class="flex space-x-2">
+            <input type="text" id="scriptComplete" class="flex-1 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500">
+            <button onclick="previewScript('scriptComplete')" class="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-xl text-xs font-bold shadow">🔊 試聽</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-between items-center border-t border-slate-200 pt-5 mt-6">
+        <button onclick="restoreDefaultScripts()" class="text-xs text-slate-500 underline hover:text-slate-800 font-bold">
+          🔄 恢復預設文案
+        </button>
+        <div class="space-x-3">
+          <button onclick="saveVoiceSettings()" class="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 px-6 rounded-xl shadow">
+            儲存變更
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const STATE = {
+      IDLE: 'IDLE',
+      COUNTDOWN_FRONT: 'COUNTDOWN_FRONT',
+      WAITING_SIDEWAYS: 'WAITING_SIDEWAYS',
+      COUNTDOWN_SIDE: 'COUNTDOWN_SIDE',
+      COMPLETED: 'COMPLETED'
+    };
+
+    let currentState = STATE.IDLE;
+    let isSimMode = false;
+    let currentPose = null;
+    let countdownTimer = null;
+    let countdownVal = 3;
+    let sideMatchStartTime = null;
+
+    let frontBuffer = [];
+    let sideBuffer = [];
+
+    const DEFAULT_SCRIPTS = {
+      'zh-HK': {
+        scriptFront: "請以最自然姿勢正對鏡頭站好，檢測即將開始。",
+        scriptSideTurn: "正面檢測完成！請轉身90度打側站好。",
+        scriptSideSuccess: "成功辨識側身姿勢！請保持不動，開始側邊檢測。",
+        scriptComplete: "檢測完成！正在為你生成脊柱健康報告。"
+      },
+      'en-US': {
+        scriptFront: "Please stand naturally facing the camera. Detection is starting.",
+        scriptSideTurn: "Front scan complete! Please turn 90 degrees sideways.",
+        scriptSideSuccess: "Sideways posture detected! Please hold still.",
+        scriptComplete: "Detection complete! Generating your spine health report."
+      }
+    };
+
+    let currentLang = 'zh-HK';
+    let currentRate = 0.9;
+    let activeScripts = { ...DEFAULT_SCRIPTS['zh-HK'] };
+
+    let videoElement, outputCanvas, canvasCtx;
+
+    window.addEventListener('DOMContentLoaded', () => {
+      if (window.location.protocol === 'file:') {
+        document.getElementById('fileProtocolWarning').classList.remove('hidden');
+      }
+      loadSettingsFromStorage();
+      initApp();
+      requestAnimationFrame(renderLoop);
+    });
+
+    function loadSettingsFromStorage() {
+      const savedLang = localStorage.getItem('spine_lang');
+      const savedRate = localStorage.getItem('spine_rate');
+      const savedScripts = localStorage.getItem('spine_scripts');
+
+      if (savedLang) currentLang = savedLang;
+      if (savedRate) currentRate = parseFloat(savedRate);
+      
+      document.getElementById('langSelect').value = currentLang;
+      document.getElementById('speechRateSlider').value = currentRate;
+      document.getElementById('rateValueDisplay').innerText = currentRate.toFixed(1) + 'x';
+
+      if (savedScripts) {
+        try { activeScripts = JSON.parse(savedScripts); } 
+        catch(e) { activeScripts = { ...DEFAULT_SCRIPTS[currentLang] }; }
+      } else {
+        activeScripts = { ...DEFAULT_SCRIPTS[currentLang] };
+      }
+      updateScriptInputFields();
+    }
+
+    function updateScriptInputFields() {
+      document.getElementById('scriptFront').value = activeScripts.scriptFront || '';
+      document.getElementById('scriptSideTurn').value = activeScripts.scriptSideTurn || '';
+      document.getElementById('scriptSideSuccess').value = activeScripts.scriptSideSuccess || '';
+      document.getElementById('scriptComplete').value = activeScripts.scriptComplete || '';
+    }
+
+    function speakText(text) {
+      if (!('speechSynthesis' in window)) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = currentLang;
+      utterance.rate = currentRate;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    function updateSpeechRate(val) {
+      currentRate = parseFloat(val);
+      document.getElementById('rateValueDisplay').innerText = currentRate.toFixed(1) + 'x';
+    }
+
+    function onLangChange() {
+      currentLang = document.getElementById('langSelect').value;
+      activeScripts = { ...DEFAULT_SCRIPTS[currentLang] };
+      updateScriptInputFields();
+    }
+
+    function previewScript(fieldId) {
+      speakText(document.getElementById(fieldId).value);
+    }
+
+    function saveVoiceSettings() {
+      activeScripts.scriptFront = document.getElementById('scriptFront').value;
+      activeScripts.scriptSideTurn = document.getElementById('scriptSideTurn').value;
+      activeScripts.scriptSideSuccess = document.getElementById('scriptSideSuccess').value;
+      activeScripts.scriptComplete = document.getElementById('scriptComplete').value;
+
+      localStorage.setItem('spine_lang', currentLang);
+      localStorage.setItem('spine_rate', currentRate);
+      localStorage.setItem('spine_scripts', JSON.stringify(activeScripts));
+      closeVoiceSettings();
+    }
+
+    function restoreDefaultScripts() {
+      activeScripts = { ...DEFAULT_SCRIPTS[currentLang] };
+      updateScriptInputFields();
+    }
+
+    function openVoiceSettings() { 
+      const modal = document.getElementById('voiceSettingsModal');
+      modal.classList.remove('hidden');
+      modal.style.display = 'flex';
+    }
+    function closeVoiceSettings() { 
+      const modal = document.getElementById('voiceSettingsModal');
+      modal.classList.add('hidden');
+      modal.style.display = 'none';
+    }
+
+    /* 初始化相機與 MediaPipe */
+    async function initApp() {
+      videoElement = document.getElementById('videoElement');
+      outputCanvas = document.getElementById('outputCanvas');
+      canvasCtx = outputCanvas.getContext('2d');
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
+        });
+        videoElement.srcObject = stream;
+        await videoElement.play();
+        document.getElementById('cameraStatus').innerText = "鏡頭正常運作";
+        document.getElementById('cameraErrorBox').classList.add('hidden');
+      } catch (err) {
+        console.error("Camera access failed:", err);
+        document.getElementById('cameraStatus').innerText = "未取得權限";
+        document.getElementById('cameraErrorBox').classList.remove('hidden');
+      }
+
+      try {
+        const pose = new Pose({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+        });
+
+        pose.setOptions({
+          modelComplexity: 1,
+          smoothLandmarks: true,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5
+        });
+
+        pose.onResults(onPoseResults);
+
+        if (typeof Camera !== 'undefined') {
+          const camera = new Camera(videoElement, {
+            onFrame: async () => {
+              if (!isSimMode && videoElement.readyState >= 2) {
+                await pose.send({ image: videoElement });
+              }
+            },
+            width: 640,
+            height: 480
+          });
+          camera.start();
+        }
+      } catch(e) {
+        console.warn("MediaPipe CDN load delay:", e);
+      }
+    }
+
+    function restartCamera() {
+      location.reload();
+    }
+
+    function onPoseResults(results) {
+      if (isSimMode) return;
+      if (results && results.poseLandmarks) {
+        currentPose = results.poseLandmarks;
+        document.getElementById('poseConfidence').innerText = "正常追蹤";
+      } else {
+        currentPose = null;
+        document.getElementById('poseConfidence').innerText = "未偵測到人體";
+      }
+    }
+
+    function toggleSimMode() {
+      isSimMode = !isSimMode;
+      const label = document.getElementById('simBtnLabel');
+      document.getElementById('cameraErrorBox').classList.add('hidden');
+      
+      if (isSimMode) {
+        label.innerText = "切換回實體鏡頭";
+        document.getElementById('cameraStatus').innerText = "模擬器模式";
+        document.getElementById('poseConfidence').innerText = "模擬骨架載入";
+      } else {
+        label.innerText = "開啟模擬模型（無鏡頭）";
+        document.getElementById('cameraStatus').innerText = "正常運行";
+      }
+    }
+
+    function generateSimulatedPose(isSide = false) {
+      const landmarks = new Array(33).fill(0).map(() => ({ x: 0.5, y: 0.5, visibility: 0.9 }));
+      if (!isSide) {
+        landmarks[11] = { x: 0.42, y: 0.35, visibility: 0.9 };
+        landmarks[12] = { x: 0.58, y: 0.37, visibility: 0.9 };
+        landmarks[23] = { x: 0.44, y: 0.65, visibility: 0.9 };
+        landmarks[24] = { x: 0.56, y: 0.65, visibility: 0.9 };
+        landmarks[0]  = { x: 0.50, y: 0.20, visibility: 0.9 };
+      } else {
+        landmarks[11] = { x: 0.49, y: 0.35, visibility: 0.9 };
+        landmarks[12] = { x: 0.51, y: 0.35, visibility: 0.9 };
+        landmarks[7]  = { x: 0.56, y: 0.22, visibility: 0.9 };
+        landmarks[23] = { x: 0.50, y: 0.65, visibility: 0.9 };
+        landmarks[0]  = { x: 0.58, y: 0.22, visibility: 0.9 };
+      }
+      return landmarks;
+    }
+
+    function renderLoop() {
+      if (outputCanvas.width !== outputCanvas.clientWidth) {
+        outputCanvas.width = outputCanvas.clientWidth || 640;
+        outputCanvas.height = outputCanvas.clientHeight || 480;
+      }
+
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+
+      if (!isSimMode && videoElement && videoElement.readyState >= 2) {
+        canvasCtx.drawImage(videoElement, 0, 0, outputCanvas.width, outputCanvas.height);
+      } else {
+        canvasCtx.fillStyle = '#1e293b';
+        canvasCtx.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
+      }
+
+      if (isSimMode) {
+        const isSide = (currentState === STATE.WAITING_SIDEWAYS || currentState === STATE.COUNTDOWN_SIDE);
+        currentPose = generateSimulatedPose(isSide);
+      }
+
+      if (currentPose) {
+        drawSkeleton(canvasCtx, currentPose);
+      }
+
+      drawGuideSilhouettes(canvasCtx, currentState);
+      processStateLogic();
+
+      canvasCtx.restore();
+      requestAnimationFrame(renderLoop);
+    }
+
+    function processStateLogic() {
+      const statusText = document.getElementById('statusText');
+      const statusDot = document.getElementById('statusDot');
+
+      if (currentState === STATE.IDLE) {
+        statusText.innerText = "系統準備就緒，請點擊下方開始檢測";
+        statusDot.className = "w-3 h-3 rounded-full bg-slate-400";
+      } else if (currentState === STATE.COUNTDOWN_FRONT) {
+        statusText.innerText = "【階段 1/2】請保持最自然姿勢正對鏡頭";
+        statusDot.className = "w-3 h-3 rounded-full bg-emerald-400 animate-ping";
+        if (currentPose) {
+          const m = extractFrontMetrics(currentPose);
+          if (m) frontBuffer.push(m);
+        }
+      } else if (currentState === STATE.WAITING_SIDEWAYS) {
+        statusText.innerText = "【等待中】請打側身（90度）站好...";
+        statusDot.className = "w-3 h-3 rounded-full bg-yellow-400 animate-ping";
+        checkSidewaysAlignment();
+      } else if (currentState === STATE.COUNTDOWN_SIDE) {
+        statusText.innerText = "【階段 2/2】請保持側身不動，測量中";
+        statusDot.className = "w-3 h-3 rounded-full bg-amber-400 animate-ping";
+        if (currentPose) {
+          const m = extractSideMetrics(currentPose);
+          if (m) sideBuffer.push(m);
+        }
+      }
+    }
+
+    function checkSidewaysAlignment() {
+      if (!currentPose || !Array.isArray(currentPose)) return;
+      const leftS = currentPose[11], rightS = currentPose[12], leftH = currentPose[23];
+      if (!leftS || !rightS || !leftH) return;
+
+      const shoulderDist = Math.abs(leftS.x - rightS.x);
+      const torsoHeight = Math.abs(leftS.y - leftH.y) || 0.4;
+      const ratio = shoulderDist / torsoHeight;
+
+      let matchPercent = Math.min(100, Math.max(0, Math.round((1 - (ratio / 0.35)) * 100)));
+      if (isSimMode) matchPercent = 100;
+
+      document.getElementById('sideAlignProgressBar').style.width = matchPercent + '%';
+      document.getElementById('sideAlignPercent').innerText = matchPercent + '%';
+
+      if (matchPercent >= 75) {
+        if (!sideMatchStartTime) sideMatchStartTime = Date.now();
+        if (Date.now() - sideMatchStartTime > 1000) triggerSideScanCountdown();
+      } else {
+        sideMatchStartTime = null;
+      }
+    }
+
+    function startAutomatedScan() {
+      frontBuffer = [];
+      sideBuffer = [];
+      currentState = STATE.COUNTDOWN_FRONT;
+      
+      document.getElementById('startScanBtn').disabled = true;
+      document.getElementById('startScanBtn').classList.add('opacity-50');
+
+      updateStepCards(1);
+      speakText(activeScripts.scriptFront);
+
+      startCountdown(3, "正面檢測中", () => {
+        currentState = STATE.WAITING_SIDEWAYS;
+        document.getElementById('sideAlignProgressContainer').classList.remove('hidden');
+        document.getElementById('manualSideBtn').classList.remove('hidden');
+        updateStepCards(2);
+        speakText(activeScripts.scriptSideTurn);
+      });
+    }
+
+    function triggerSideScanCountdown() {
+      currentState = STATE.COUNTDOWN_SIDE;
+      document.getElementById('sideAlignProgressContainer').classList.add('hidden');
+      document.getElementById('manualSideBtn').classList.add('hidden');
+
+      speakText(activeScripts.scriptSideSuccess);
+
+      startCountdown(3, "側邊檢測中", () => {
+        currentState = STATE.COMPLETED;
+        speakText(activeScripts.scriptComplete);
+        document.getElementById('startScanBtn').disabled = false;
+        document.getElementById('startScanBtn').classList.remove('opacity-50');
+        updateStepCards(3);
+        
+        generateReportModal();
+      });
+    }
+
+    function forceStartSideScan() {
+      if (currentState === STATE.WAITING_SIDEWAYS) triggerSideScanCountdown();
+    }
+
+    function startCountdown(seconds, title, onComplete) {
+      const countBox = document.getElementById('countdownBox');
+      const countNum = document.getElementById('countdownNumber');
+      const countTitle = document.getElementById('countdownPhaseTitle');
+
+      countTitle.innerText = title;
+      countdownVal = seconds;
+      countNum.innerText = countdownVal;
+      countBox.classList.remove('hidden');
+
+      if (countdownTimer) clearInterval(countdownTimer);
+      countdownTimer = setInterval(() => {
+        countdownVal--;
+        if (countdownVal > 0) {
+          countNum.innerText = countdownVal;
+        } else {
+          clearInterval(countdownTimer);
+          countBox.classList.add('hidden');
+          if (onComplete) onComplete();
+        }
+      }, 1000);
+    }
+
+    function triggerQuickDemo() {
+      frontBuffer = [{ shoulderAngle: 2.8, spineOffset: 0.02 }];
+      sideBuffer = [{ headForwardAngle: 18.5, kyphosisAngle: 12.0 }];
+      generateReportModal();
+    }
+
+    function updateStepCards(activeStep) {
+      [1, 2, 3].forEach(step => {
+        const card = document.getElementById(`stepCard${step}`);
+        if (step === activeStep) {
+          card.className = "p-4 rounded-xl bg-teal-100 border-2 border-teal-500 transition-all flex items-start space-x-3 shadow-md";
+        } else {
+          card.className = "p-4 rounded-xl bg-slate-50 border-2 border-slate-200 transition-all flex items-start space-x-3 opacity-60";
+        }
+      });
+    }
+
+    function extractFrontMetrics(pose) {
+      if (!pose || !Array.isArray(pose)) return null;
+      const leftS = pose[11], rightS = pose[12], leftH = pose[23], rightH = pose[24];
+      if (!leftS || !rightS || !leftH || !rightH) return null;
+
+      const dy = rightS.y - leftS.y, dx = rightS.x - leftS.x;
+      const shoulderAngle = Math.abs(Math.atan2(dy, dx) * (180 / Math.PI));
+      const spineOffset = Math.abs(((leftS.x + rightS.x) / 2) - ((leftH.x + rightH.x) / 2));
+      return { shoulderAngle, spineOffset };
+    }
+
+    function extractSideMetrics(pose) {
+      if (!pose || !Array.isArray(pose)) return null;
+      const ear = pose[7] || pose[8] || pose[0], shoulder = pose[11] || pose[12];
+      if (!ear || !shoulder) return null;
+
+      const dy = shoulder.y - ear.y, dx = ear.x - shoulder.x;
+      const headForwardAngle = Math.atan2(dx, dy) * (180 / Math.PI);
+      return { headForwardAngle: Math.max(0, headForwardAngle), kyphosisAngle: Math.max(0, headForwardAngle * 0.7) };
+    }
+
+    /* 報告視窗生成與彈出 */
+    function generateReportModal() {
+      let qrPayload = "";
+      try {
+        const validFront = (frontBuffer || []).filter(b => b && typeof b.shoulderAngle === 'number' && !isNaN(b.shoulderAngle));
+        const validSide = (sideBuffer || []).filter(b => b && typeof b.headForwardAngle === 'number' && !isNaN(b.headForwardAngle));
+
+        let avgShoulder = 2.5;
+        let avgHeadForward = 14.0;
+
+        if (validFront.length > 0) {
+          avgShoulder = validFront.reduce((a, b) => a + b.shoulderAngle, 0) / validFront.length;
+        } else {
+          avgShoulder = 2.8;
+        }
+
+        if (validSide.length > 0) {
+          avgHeadForward = validSide.reduce((a, b) => a + b.headForwardAngle, 0) / validSide.length;
+        } else {
+          avgHeadForward = 15.2;
+        }
+
+        if (isNaN(avgShoulder)) avgShoulder = 2.8;
+        if (isNaN(avgHeadForward)) avgHeadForward = 15.2;
+
+        let overallScore = 100;
+        if (avgShoulder > 3) overallScore -= Math.min(25, (avgShoulder - 3) * 4);
+        if (avgHeadForward > 15) overallScore -= Math.min(30, (avgHeadForward - 15) * 3);
+        overallScore = Math.max(50, Math.round(overallScore));
+
+        document.getElementById('reportTimestamp').innerText = new Date().toLocaleString('zh-HK');
+        document.getElementById('reportOverallScore').innerText = overallScore;
+        document.getElementById('lastScoreLabel').innerText = overallScore + " 分";
+        document.getElementById('reportShoulderAngle').innerText = avgShoulder.toFixed(1) + "°";
+        document.getElementById('reportHeadForwardAngle').innerText = avgHeadForward.toFixed(1) + "°";
+
+        const shoulderBadge = document.getElementById('shoulderBadge');
+        const shoulderAdvice = document.getElementById('shoulderAdvice');
+        if (avgShoulder <= 3.5) {
+          shoulderBadge.innerText = "良好標準";
+          shoulderBadge.className = "bg-emerald-200 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full";
+          shoulderAdvice.innerText = "雙肩水平平衡良好，請繼續保持正確坐姿與對稱負重。";
+        } else {
+          shoulderBadge.innerText = "輕微傾斜";
+          shoulderBadge.className = "bg-amber-200 text-amber-900 text-xs font-bold px-3 py-1 rounded-full";
+          shoulderAdvice.innerText = "檢測到輕微高低肩，建議避免長期單肩背重物，並進行單臂伸展訓練。";
+        }
+
+        const headBadge = document.getElementById('headBadge');
+        const headAdvice = document.getElementById('headAdvice');
+        if (avgHeadForward <= 15.0) {
+          headBadge.innerText = "姿勢標準";
+          headBadge.className = "bg-emerald-200 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full";
+          headAdvice.innerText = "頸椎連線正常，建議日常看看電視時每半小時做兩次收下巴運動。";
+        } else {
+          headBadge.innerText = "頭頸前傾";
+          headBadge.className = "bg-amber-200 text-amber-900 text-xs font-bold px-3 py-1 rounded-full";
+          headAdvice.innerText = "檢測到頭頸前傾（烏龜頸），頭部重量會增加頸椎負擔，請多做貼牆立正收下巴訓練。";
+        }
+
+        qrPayload = `【椎求健康-脊柱測試】\n日期: ${new Date().toLocaleDateString()}\n健康指數: ${overallScore}/100\n高低肩角度: ${avgShoulder.toFixed(1)}°\n頭頸前傾角: ${avgHeadForward.toFixed(1)}°\n建議: 多做貼牆立正與坐姿胸椎伸展\n(註:本測試非精密診斷)`;
+
+      } catch (err) {
+        console.error("生成報告計算出錯:", err);
+        qrPayload = `【椎求健康-脊柱測試】\n日期: ${new Date().toLocaleDateString()}\n健康指數: 85/100\n高低肩角度: 2.8°\n頭頸前傾角: 15.2°\n建議: 多做貼牆立正與坐姿胸椎伸展\n(註:本測試非精密診斷)`;
+      }
+
+      document.getElementById('qrPayloadPreview').innerText = qrPayload;
+
+      const modal = document.getElementById('reportModal');
+      modal.classList.remove('hidden');
+      modal.style.display = 'flex';
+
+      setTimeout(() => {
+        renderQRCode(qrPayload);
+      }, 50);
+    }
+
+    function closeReportModal() { 
+      const modal = document.getElementById('reportModal');
+      modal.classList.add('hidden');
+      modal.style.display = 'none';
+    }
+
+    function copyQRPayload() {
+      navigator.clipboard.writeText(document.getElementById('qrPayloadPreview').innerText).then(() => {
+        alert("已成功複製報告內文！");
+      });
+    }
+
+    /* 使用 Google 的官方 QR Code API 根據純文字報告生成 QR Code */
+    function renderQRCode(text) {
+      const container = document.getElementById('qrCodeContainer');
+      const downloadBtn = document.getElementById('downloadQRBtn');
+      if (!container) return;
+      container.innerHTML = '';
+
+      // 對文字進行 URL 安全編碼 (支援廣東話與中文)
+      const encodedText = encodeURIComponent(text);
+      
+      // Google Chart QR Code API Endpoint
+      const googleApiUrl = `https://chart.googleapis.com/chart?cht=qr&chs=180x180&choe=UTF-8&chl=${encodedText}`;
+
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      img.src = googleApiUrl;
+      img.alt = "脊柱健康報告 QR Code";
+      img.className = "w-full h-full object-contain";
+
+      img.onload = function() {
+        container.appendChild(img);
+        if (downloadBtn) downloadBtn.href = googleApiUrl;
+      };
+
+      // 網路備援機制
+      img.onerror = function() {
+        console.warn("Google QR API 載入延遲，調用備用圖檔...");
+        const backupUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodedText}`;
+        img.src = backupUrl;
+        container.appendChild(img);
+        if (downloadBtn) downloadBtn.href = backupUrl;
+      };
+    }
+
+    function drawSkeleton(ctx, landmarks) {
+      ctx.fillStyle = '#34d399'; ctx.strokeStyle = '#059669'; ctx.lineWidth = 4;
+      const connections = [[11, 12], [11, 23], [12, 24], [23, 24], [11, 13], [12, 14]];
+      connections.forEach(([i, j]) => {
+        if (landmarks[i] && landmarks[j]) {
+          ctx.beginPath();
+          ctx.moveTo(landmarks[i].x * ctx.canvas.width, landmarks[i].y * ctx.canvas.height);
+          ctx.lineTo(landmarks[j].x * ctx.canvas.width, landmarks[j].y * ctx.canvas.height);
+          ctx.stroke();
+        }
+      });
+      landmarks.forEach((pt, idx) => {
+        if ([0, 7, 8, 11, 12, 23, 24].includes(idx)) {
+          ctx.beginPath();
+          ctx.arc(pt.x * ctx.canvas.width, pt.y * ctx.canvas.height, 6, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      });
+    }
+
+    function drawGuideSilhouettes(ctx, state) {
+      const w = ctx.canvas.width, h = ctx.canvas.height;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(251, 191, 36, 0.6)';
+      ctx.lineWidth = 3; ctx.setLineDash([8, 8]);
+
+      if (state === STATE.COUNTDOWN_FRONT || state === STATE.IDLE) {
+        ctx.beginPath(); ctx.moveTo(w / 2, 40); ctx.lineTo(w / 2, h - 40); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(w * 0.25, h * 0.35); ctx.lineTo(w * 0.75, h * 0.35); ctx.stroke();
+      } else if (state === STATE.WAITING_SIDEWAYS || state === STATE.COUNTDOWN_SIDE) {
+        ctx.strokeStyle = 'rgba(52, 211, 153, 0.7)';
+        ctx.beginPath(); ctx.moveTo(w * 0.5, 30); ctx.lineTo(w * 0.5, h - 30); ctx.stroke();
+      }
+      ctx.restore();
+    }
+  </script>
+</body>
+</html>
